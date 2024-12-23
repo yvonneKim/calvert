@@ -1,45 +1,69 @@
-from pathlib import Path
-from unittest.mock import patch, MagicMock
-import tempfile
 import pytest
-from calvert.utils import dl_images, images_to_events, query_ai_model, Event
+from pathlib import Path
+import base64
+from PIL import Image
+import io
+import json
+from unittest.mock import Mock, patch
+from calvert.utils import resize_image, Claude
+from calvert.models import Event
 
 
-def test_dl_images():
-    with patch("subprocess.run") as mock_run:
-        input_url = "https://example.com/gallery"
-        temp_dir = dl_images(input_url)
-        mock_run.assert_called_once_with(
-            ["gallery-dl", "-D", str(temp_dir), input_url], check=True
-        )
-        assert temp_dir.exists()
-        assert temp_dir.is_dir()
+@pytest.fixture
+def test_image(tmp_path):
+    img = Image.new("RGB", (100, 100), color="red")
+    path = tmp_path / "test.jpg"
+    img.save(path)
+    return path
 
 
-def test_images_to_events():
-    with patch("calvert.utils.query_ai_model") as mock_query_ai_model:
-        temp_dir = Path(tempfile.mkdtemp())
-        (temp_dir / "test.jpg").touch()
-        images_to_events(temp_dir)
-        mock_query_ai_model.assert_called_once_with(temp_dir / "test.jpg")
+@pytest.fixture
+def test_png_image(tmp_path):
+    img = Image.new("RGBA", (100, 100), color=(255, 0, 0, 255))
+    path = tmp_path / "test.png"
+    img.save(path)
+    return path
 
 
-def test_query_ai_model():
-    with patch("langchain_anthropic.ChatAnthropic.invoke") as mock_invoke:
-        mock_invoke.return_value = MagicMock(
-            content='{"summary": "Test Event", "description": "This is a test event.", "start": {"dateTime": "2023-01-01T00:00:00Z", "timeZone": "UTC"}, "end": {"dateTime": "2023-01-01T01:00:00Z", "timeZone": "UTC"}}'
-        )
-        test_image = Path("./tests/data/test-image.jpg")
-        result = query_ai_model(test_image)
-        mock_invoke.assert_called_once()
-        assert isinstance(result, Event)
-        assert result.summary == "Test Event"
-        assert result.description == "This is a test event."
-        assert result.start.dateTime == "2023-01-01T00:00:00Z"
-        assert result.start.timeZone == "UTC"
-        assert result.end.dateTime == "2023-01-01T01:00:00Z"
-        assert result.end.timeZone == "UTC"
+def test_resize_image(test_image):
+    base64_str, media_type = resize_image(test_image)
+    assert media_type == "image/jpeg"
+    assert isinstance(base64_str, str)
+    decoded = base64.b64decode(base64_str)
+    img = Image.open(io.BytesIO(decoded))
+    assert img.mode == "RGB"
 
 
-if __name__ == "__main__":
-    pytest.main()
+def test_resize_png_image(test_png_image):
+    base64_str, media_type = resize_image(test_png_image)
+    assert media_type == "image/png"
+    assert isinstance(base64_str, str)
+    decoded = base64.b64decode(base64_str)
+    img = Image.open(io.BytesIO(decoded))
+    assert img.mode == "RGB"  # Should be converted from RGBA
+
+
+def test_resize_image_invalid():
+    with pytest.raises(ValueError):
+        resize_image(Path("test.txt"))
+
+
+@patch("calvert.utils.ChatAnthropic")
+def test_claude_extract_event(mock_anthropic, test_image):
+    mock_response = Mock()
+    mock_response.content = json.dumps(
+        {
+            "start": {"dateTime": "2024-03-20T10:00:00", "timeZone": "UTC"},
+            "end": {"dateTime": "2024-03-20T11:00:00", "timeZone": "UTC"},
+            "summary": "Test Event",
+            "description": "Test Description",
+        }
+    )
+    mock_anthropic.return_value.invoke.return_value = mock_response
+
+    claude = Claude()
+    event = claude.extract_event_from_image(test_image)
+
+    assert isinstance(event, Event)
+    assert event.summary == "Test Event"
+    assert event.description == "Test Description"

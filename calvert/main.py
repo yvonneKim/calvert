@@ -1,19 +1,26 @@
 import argparse
-
 from pathlib import Path
 
-from calvert.utils import images_to_events
+
+from utils import Claude, GoogleCalendar
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Download images using gallery-dl")
-    args = parser.parse_args()
+    parser = argparse.ArgumentParser(
+        description="Create Google Calendar events from images."
+    )
+    parser.add_argument("-d", "--directory", help="Path to a directory of images.")
+    path_to_images = Path(parser.parse_args().directory)
 
-    # path_to_images = dl_images(args.input)
-    path_to_images = Path("temp_dir")
-    print(f"Images downloaded to: {path_to_images}")
-    events = images_to_events(path_to_images)
-    print(events)
+    claude = Claude()
+    gcal = GoogleCalendar()
+
+    events = []
+    for image_path in path_to_images.iterdir():
+        events.append(claude.extract_event_from_image(image_path))
+
+    for event in events:
+        gcal.add_event(event)
 
 
 if __name__ == "__main__":

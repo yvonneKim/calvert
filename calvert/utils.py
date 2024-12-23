@@ -1,46 +1,81 @@
-from dataclasses import dataclass
+from dataclasses import asdict
+from datetime import datetime
 import io
 import subprocess
 import tempfile
 import base64
 from pathlib import Path
-from typing import List
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
 import json
 
 from PIL import Image
+import os
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+
+from models import Event
+
+SYSTEM_PROMPT = """
+Analyze the following image and extract event details as a json with this schema.
+All dateTime values must be in ISO 8601 format with UTC timezone (e.g. "2024-03-22T15:30:00Z").
+
+Return strictly valid JSON matching this schema:
+{{
+    "start": {{
+        "dateTime": "<ISO8601_datetime>",  # Required, must include time
+        "timeZone": "UTC"                  # Always UTC
+    }},
+    "end": {{
+        "dateTime": "<ISO8601_datetime>",  # Required, must include time
+        "timeZone": "UTC"                  # Always UTC
+    }},
+    "summary": "<event_title>",            # Required, brief title
+    "description": "<full_details>"        # Required, include all context and details
+}}
+
+Rules:
+- If no end time specified, assume event lasts 1 hour
+- If no timezone specified, use UTC
+- If date is mentioned without year, use {year}
+- If time is ambiguous (e.g., "5pm"), interpret as 17:00 UTC
+- description should include all text visible in image that provides context
+- summary should be a concise title suitable for calendar view
+
+Return only the JSON, no other text.
+"""
 
 
-@dataclass
-class EventDateTime:
-    dateTime: str
-    timeZone: str
-
-
-@dataclass
-class Event:
-    summary: str
-    description: str
-    start: EventDateTime
-    end: EventDateTime
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "Event":
-        return cls(
-            summary=data["summary"],
-            description=data["description"],
-            start=EventDateTime(**data["start"]),
-            end=EventDateTime(**data["end"]),
+class GoogleCalendar:
+    def __init__(self):
+        self.calendar_id = os.environ["CALENDAR_ID"]
+        self.service = build(
+            "calendar",
+            "v3",
+            credentials=Credentials.from_service_account_file(
+                os.path.expandvars(os.environ["GOOGLE_APPLICATION_CREDENTIALS"]),
+                scopes=["https://www.googleapis.com/auth/calendar"],
+            ),
         )
 
+        calendars = {
+            cal["id"]: cal
+            for cal in self.service.calendarList().list().execute()["items"]
+        }
 
-def prepare_image(image_path: Path, max_size_mb: float = 99) -> tuple[str, str]:
-    """
-    Encode an image for Claude, automatically resizing if it's too large.
-    Returns tuple of (base64_string, media_type)
-    """
+        self.calendar = calendars[self.calendar_id]
+
+    def add_event(self, event: Event):
+        result = (
+            self.service.events()
+            .insert(calendarId=self.calendar_id, body=asdict(event))
+            .execute()
+        )
+        print(f"Created event: {result.get('htmlLink')}")
+
+
+def resize_image(image_path: Path, max_size_mb: float = 99) -> tuple[str, str]:
     supported_types = {
         ".jpg": "jpeg",
         ".jpeg": "jpeg",
@@ -61,7 +96,8 @@ def prepare_image(image_path: Path, max_size_mb: float = 99) -> tuple[str, str]:
     buffer = io.BytesIO()
     img.save(buffer, format=supported_types[ext])
     if buffer.tell() > 100 * 1024 * 1024:
-        new_size = tuple(dim // 2 for dim in img.size)
+        x, y = img.size
+        new_size = (x // 2, y // 2)
         img = img.resize(new_size)
         buffer = io.BytesIO()
         img.save(buffer, format=supported_types[ext])
@@ -72,70 +108,41 @@ def prepare_image(image_path: Path, max_size_mb: float = 99) -> tuple[str, str]:
     return base64_image, media_type
 
 
-model = ChatAnthropic(
-    model_name="claude-3-sonnet-20240229",
-    timeout=60,
-    stop=None,
-)
+class Claude:
+    def __init__(self):
+        self.model = ChatAnthropic(
+            model_name="claude-3-sonnet-20240229",
+            timeout=60,
+            stop=None,
+        )
 
+    def extract_event_from_image(self, image_path: Path) -> Event | None:
+        image_b64_data, media_type = resize_image(image_path)
+        response = self.model.invoke(
+            [
+                SystemMessage(content=SYSTEM_PROMPT.format(year=datetime.now().year)),
+                HumanMessage(
+                    content=[
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": image_b64_data,
+                            },
+                        }
+                    ]
+                ),
+            ]
+        )
 
-def query_ai_model(image_path: Path) -> Event | None:
-    try:
-        image_b64_data, media_type = prepare_image(image_path)
-    except ValueError as e:
-        print(f"Error preparing image: {e}")
-        return None
+        try:
+            event = Event.from_dict(json.loads(str(response.content)))
+        except json.JSONDecodeError as e:
+            print(f"Error decoding response: {e}")
+            return None
 
-    response = model.invoke(
-        [
-            SystemMessage(
-                content="""
-                Analyze the following image and extract event details as a json with this schema:
-                {
-                    "start": {
-                        "dateTime": "<start_date_time>",
-                        "timeZone": "<time_zone>"
-                    },
-                    "end": {
-                        "dateTime": "<end_date_time>",
-                        "timeZone": "<time_zone>"
-                    },
-                    "summary": "<event_summary>",
-                    "description": "<event_summary>"
-                }
-                """
-            ),
-            HumanMessage(
-                content=[
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": media_type,
-                            "data": image_b64_data,
-                        },
-                    }
-                ]
-            ),
-        ]
-    )
-
-    try:
-        event_details = json.loads(str(response.content))
-    except json.JSONDecodeError as e:
-        print(f"Error decoding response: {e}")
-        return None
-
-    event = Event.from_dict(event_details)
-
-    return event
-
-
-def images_to_events(path: Path) -> List[Event]:
-    events = []
-    for img_file in path.glob("*"):
-        events.append(query_ai_model(img_file))
-    return events
+        return event
 
 
 def dl_images(input: str) -> Path:
