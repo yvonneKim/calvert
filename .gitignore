@@ -39,5 +39,5 @@ credentials.json
 .envrc
 .direnv/
 .env
-calvert/client_secret.json
 flask_session/
+client_secret.json

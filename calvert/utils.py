@@ -12,8 +12,10 @@ import json
 
 from PIL import Image
 import os
-from google.oauth2.service_account import Credentials
+from google.auth import default
 from googleapiclient.discovery import build
+from google.cloud import secretmanager
+from pydantic import SecretStr
 
 from models import Event
 
@@ -50,14 +52,8 @@ Return only the JSON, no other text.
 class GoogleCalendar:
     def __init__(self):
         self.calendar_id = os.environ["CALENDAR_ID"]
-        self.service = build(
-            "calendar",
-            "v3",
-            credentials=Credentials.from_service_account_file(
-                os.path.expandvars(os.environ["GOOGLE_APPLICATION_CREDENTIALS"]),
-                scopes=["https://www.googleapis.com/auth/calendar"],
-            ),
-        )
+        credentials, _ = default(scopes=["https://www.googleapis.com/auth/calendar"])
+        self.service = build("calendar", "v3", credentials=credentials)
 
         calendars = {
             cal["id"]: cal
@@ -111,10 +107,18 @@ def resize_image(image_path: Path, max_size_mb: float = 99) -> tuple[str, str]:
 class Claude:
     def __init__(self):
         self.model = ChatAnthropic(
+            api_key=self.get_anthropic_api_key(),
             model_name="claude-3-sonnet-20240229",
             timeout=60,
             stop=None,
         )
+
+    def get_anthropic_api_key(self) -> SecretStr:
+        client = secretmanager.SecretManagerServiceClient()
+        response = client.access_secret_version(
+            name=f"projects/{os.environ['PROJECT_ID']}/secrets/ANTHROPIC_API_KEY/versions/latest"
+        )
+        return SecretStr(response.payload.data.decode("UTF-8"))
 
     def extract_event_from_image(self, image_path: Path) -> Event | None:
         image_b64_data, media_type = resize_image(image_path)

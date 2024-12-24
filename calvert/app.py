@@ -13,7 +13,7 @@ app = Flask(__name__)
 app.config["SESSION_TYPE"] = "filesystem"
 Session(app)
 
-if app.debug:
+if os.getenv("FLASK_ENV") == "development":
     os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 CLIENT_SECRETS_FILE = "client_secret.json"
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
@@ -58,7 +58,6 @@ def oauth2callback():
     session["credentials"] = {
         "token": credentials.token,
         "refresh_token": credentials.refresh_token,
-        "token_uri": credentials.token_uri,
         "client_id": credentials.client_id,
         "client_secret": credentials.client_secret,
         "scopes": credentials.scopes,
@@ -160,22 +159,5 @@ def add_event():
         return jsonify({"error": str(e)}), 400
 
 
-def main():
-    app.run(debug=True)
-
-    # parser = argparse.ArgumentParser(
-    #     description="Create Google Calendar events from images."
-    # )
-    # parser.add_argument("-d", "--directory", help="Path to a directory of images.")
-    # path_to_images = Path(parser.parse_args().directory)
-
-    # events = []
-    # for image_path in path_to_images.iterdir():
-    #     events.append(claude.extract_event_from_image(image_path))
-
-    # for event in events:
-    #     gcal.add_event(event)
-
-
 if __name__ == "__main__":
-    main()
+    app.run(host="0.0.0.0", port=8080)
