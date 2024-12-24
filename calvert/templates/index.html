@@ -24,6 +24,23 @@
             {% endif %}
         </div>
 
+        <!-- List of Extracted Events -->
+        {% if user_logged_in and events %}
+            <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+                <h2 class="text-2xl font-bold mb-4">Your Extracted Events</h2>
+                <ul id="eventsList" class="list-disc pl-6">
+                    {% for event in events %}
+                        <li class="mb-2">
+                            <p><strong>Summary:</strong> {{ event.summary }}</p>
+                            <p><strong>Description:</strong> {{ event.description }}</p>
+                            <p><strong>Start:</strong> {{ event.start.dateTime }} ({{ event.start.timeZone }})</p>
+                            <p><strong>End:</strong> {{ event.end.dateTime }} ({{ event.end.timeZone }})</p>
+                        </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        {% endif %}
+
         <!-- Upload Form -->
         <form id="uploadForm" class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
             <label class="block text-gray-700 text-sm font-bold mb-2" for="image">Upload Event Image</label>
@@ -53,8 +70,21 @@
                 });
                 const result = await response.json();
                 if (response.ok) {
-                    document.getElementById('result').textContent = JSON.stringify(result, null, 2);
-                    document.getElementById('result').classList.remove('hidden');
+                    // Add the new event to the UI
+                    const eventsList = document.getElementById('eventsList');
+                    const newEvent = document.createElement('li');
+                    newEvent.classList.add('mb-2');
+                    newEvent.innerHTML = `
+                        <p><strong>Summary:</strong> ${result.summary}</p>
+                        <p><strong>Description:</strong> ${result.description}</p>
+                        <p><strong>Start:</strong> ${result.start.dateTime} (${result.start.timeZone})</p>
+                        <p><strong>End:</strong> ${result.end.dateTime} (${result.end.timeZone})</p>
+                    `;
+                    eventsList.appendChild(newEvent);
+    
+                    // Clear the result display
+                    document.getElementById('result').classList.add('hidden');
+                    alert('Event successfully extracted and added to the list!');
                 } else {
                     alert(result.error || 'Failed to extract event.');
                 }
@@ -64,5 +94,6 @@
             }
         });
     </script>
+    
 </body>
 </html>

@@ -22,10 +22,12 @@ app.config["CLAUDE"] = Claude()
 app.config["GCAL"] = GoogleCalendar()
 
 
+# Home route
 @app.route("/")
 def home():
     user_logged_in = "credentials" in session
-    return render_template("index.html", user_logged_in=user_logged_in)
+    events = session.get("events", []) if user_logged_in else []
+    return render_template("index.html", user_logged_in=user_logged_in, events=events)
 
 
 @app.route("/authorize")
@@ -78,6 +80,7 @@ def get_calendar_service():
     return build("calendar", "v3", credentials=credentials)
 
 
+# API route to extract event details from an uploaded image
 @app.route("/api/extract-event", methods=["POST"])
 def extract_event():
     if "image" not in request.files:
@@ -93,6 +96,25 @@ def extract_event():
         return jsonify(
             {"error": "Failed to extract event details from the image."}
         ), 500
+
+    # Save extracted event to session
+    if "events" not in session:
+        session["events"] = []
+    session["events"].append(
+        {
+            "summary": event.summary,
+            "description": event.description,
+            "start": {
+                "dateTime": event.start.dateTime,
+                "timeZone": event.start.timeZone,
+            },
+            "end": {
+                "dateTime": event.end.dateTime,
+                "timeZone": event.end.timeZone,
+            },
+        }
+    )
+    session.modified = True
 
     return jsonify(
         {
@@ -110,6 +132,7 @@ def extract_event():
     )
 
 
+# API route to add an event to Google Calendar
 @app.route("/api/add-event", methods=["POST"])
 def add_event():
     data = request.get_json()
@@ -119,9 +142,20 @@ def add_event():
         if not service:
             return jsonify({"error": "User not authenticated."}), 401
 
-        service.add_event(event)
-        return jsonify({"message": "Event added to Google Calendar successfully."})
+        service.events().insert(
+            calendarId="primary",
+            body={
+                "summary": event.summary,
+                "description": event.description,
+                "start": {
+                    "dateTime": event.start.dateTime,
+                    "timeZone": event.start.timeZone,
+                },
+                "end": {"dateTime": event.end.dateTime, "timeZone": event.end.timeZone},
+            },
+        ).execute()
 
+        return jsonify({"message": "Event added to Google Calendar successfully."})
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
