@@ -24,7 +24,8 @@ app.config["GCAL"] = GoogleCalendar()
 
 @app.route("/")
 def home():
-    return render_template("index.html")
+    user_logged_in = "credentials" in session
+    return render_template("index.html", user_logged_in=user_logged_in)
 
 
 @app.route("/authorize")
@@ -60,6 +61,12 @@ def oauth2callback():
         "client_secret": credentials.client_secret,
         "scopes": credentials.scopes,
     }
+    return redirect(url_for("home"))
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
     return redirect(url_for("home"))
 
 

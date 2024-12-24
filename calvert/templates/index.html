@@ -5,45 +5,64 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Event Manager</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-   
 </head>
 <body class="bg-gray-100 text-gray-800">
     <div class="container mx-auto py-10">
         <h1 class="text-4xl font-bold text-center mb-6">Event Manager</h1>
+
+        <!-- User Login Status -->
+        <div class="text-center mb-6">
+            {% if user_logged_in %}
+                <p class="text-green-500 font-semibold mb-4">You are logged in to Google.</p>
+                <a href="/logout" class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">
+                    Logout
+                </a>
+            {% else %}
+                <a href="/authorize" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+                    Login with Google
+                </a>
+            {% endif %}
+        </div>
+
+        <!-- Upload Form -->
         <form id="uploadForm" class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
             <label class="block text-gray-700 text-sm font-bold mb-2" for="image">Upload Event Image</label>
             <input class="block w-full px-4 py-2 text-sm text-gray-700 bg-gray-200 border border-gray-300 rounded" type="file" id="image" name="image">
-            <button class="mt-4 bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded" type="submit">Extract Event</button>
+            <button class="mt-4 bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded" type="submit">Extract Event</button>
         </form>
+
+        <!-- Result Display -->
         <div id="result" class="mt-4 p-4 bg-green-100 text-green-800 hidden"></div>
     </div>
-</body>
-<script>
-    document.getElementById('uploadForm').addEventListener('submit', async (event) => {
-        event.preventDefault();
-        const formData = new FormData();
-        const imageFile = document.getElementById('image').files[0];
-        if (!imageFile) {
-            alert('Please upload an image!');
-            return;
-        }
-        formData.append('image', imageFile);
-        try {
-            const response = await fetch('/api/extract-event', {
-                method: 'POST',
-                body: formData
-            });
-            const result = await response.json();
-            if (response.ok) {
-                document.getElementById('result').textContent = JSON.stringify(result, null, 2);
-                document.getElementById('result').classList.remove('hidden');
-            } else {
-                alert(result.error || 'Failed to extract event.');
+
+    <!-- JavaScript -->
+    <script>
+        document.getElementById('uploadForm').addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const formData = new FormData();
+            const imageFile = document.getElementById('image').files[0];
+            if (!imageFile) {
+                alert('Please upload an image!');
+                return;
             }
-        } catch (error) {
-            console.error('Error:', error);
-            alert('An error occurred while processing your request.');
-        }
-    });
-</script>
+            formData.append('image', imageFile);
+            try {
+                const response = await fetch('/api/extract-event', {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json();
+                if (response.ok) {
+                    document.getElementById('result').textContent = JSON.stringify(result, null, 2);
+                    document.getElementById('result').classList.remove('hidden');
+                } else {
+                    alert(result.error || 'Failed to extract event.');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('An error occurred while processing your request.');
+            }
+        });
+    </script>
+</body>
 </html>
